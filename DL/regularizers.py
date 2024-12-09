@@ -17,22 +17,33 @@ class Dropout(Layer):
         '''
         if seed is not None:
             np.random.seed(seed)
+            
         # YOUR CODE STARTS
 
+        if self.mode == 'train':
+            self.mask = (np.random.rand(*x.shape) > self.p).astype(np.float32)
+            out = x * self.mask / (1 - self.p)
+        elif self.mode == 'test':
+            out = x
 
         # YOUR CODE ENDS
+        
         else:
             raise ValueError('Invalid argument!')
+        
+        return out
 
     def backward(self, dprev):
         dx = None
         
         # YOUR CODE STARTS
 
+        dx = dprev * self.mask / (1 - self.p)
 
         # YOUR CODE ENDS
         
         return dx
+
 
 class MaxPool2d(Layer):
     def __init__(self, pool_height, pool_width, stride):
@@ -52,7 +63,17 @@ class MaxPool2d(Layer):
         out = np.zeros([N, C, out_H, out_W])
 
         # YOUR CODE STARTS
+        
+        for n in range(N):  # batch
+            for c in range(C):  # channels
+                for i in range(out_H):  # height
+                    for j in range(out_W):  # width
+                        h_start = i * self.stride
+                        h_end = h_start + self.pool_height
+                        w_start = j * self.stride
+                        w_end = w_start + self.pool_width
 
+                        out[n, c, i, j] = np.max(x[n, c, h_start:h_end, w_start:w_end])
 
         # YOUR CODE ENDS
         return out
@@ -66,11 +87,22 @@ class MaxPool2d(Layer):
 
         # Calculate the gradient (dx)
         # YOUR CODE STARTS
+        
+        for n in range(N):  # batch
+            for c in range(C):  # channels
+                for i in range(dprev_H):  # height
+                    for j in range(dprev_W):  # width
+                        h_start = i * self.stride
+                        h_end = h_start + self.pool_height
+                        w_start = j * self.stride
+                        w_end = w_start + self.pool_width
 
+                        x_window = x[n, c, h_start:h_end, w_start:w_end]
+                        max_mask = (x_window == np.max(x_window))
+                        dx[n, c, h_start:h_end, w_start:w_end] += dprev[n, c, i, j] * max_mask
 
         # YOUR CODE ENDS
         return dx
-
 
 
 class AveragePool2d(Layer):
@@ -91,6 +123,16 @@ class AveragePool2d(Layer):
         out = np.zeros([N, C, out_H, out_W])
         # YOUR CODE STARTS
 
+        for n in range(N):  # batch
+            for c in range(C):  # channels
+                for i in range(out_H):  # height
+                    for j in range(out_W):  # width
+                        h_start = i * self.stride
+                        h_end = h_start + self.pool_height
+                        w_start = j * self.stride
+                        w_end = w_start + self.pool_width
+
+                        out[n, c, i, j] = np.mean(x[n, c, h_start:h_end, w_start:w_end])
 
         # YOUR CODE ENDS
         return out
@@ -103,6 +145,16 @@ class AveragePool2d(Layer):
         dx = np.zeros_like(self.x)
         # YOUR CODE STARTS
 
+        for n in range(N):  # batch
+            for c in range(C):  # channels
+                for i in range(dprev_H):  # height
+                    for j in range(dprev_W):  # width
+                        h_start = i * self.stride
+                        h_end = h_start + self.pool_height
+                        w_start = j * self.stride
+                        w_end = w_start + self.pool_width
+
+                        dx[n, c, h_start:h_end, w_start:w_end] += dprev[n, c, i, j] / (self.pool_height * self.pool_width)
 
         # YOUR CODE ENDS
         return dx
@@ -141,9 +193,10 @@ class BatchNorm(Layer):
             
             # Update our running mean and variance then store.
 
-            running_mean = None
-            running_var = None
-            
+            running_mean = self.momentum * self.running_mean + (1 - self.momentum) * sample_mean
+            running_var = self.momentum * self.running_var + (1 - self.momentum) * sample_var
+
+            out = self.gamma * self.normalized + self.beta
 
 
             # YOUR CODE ENDS
@@ -166,6 +219,15 @@ class BatchNorm(Layer):
     def backward(self, dprev):
         N, D = dprev.shape
         # YOUR CODE STARTS
+
+        dgamma = np.sum(dprev * self.normalized, axis=0)
+        dbeta = np.sum(dprev, axis=0)
+
+        dnormalized = dprev * self.gamma
+        dvar = np.sum(dnormalized * self.x_sub_mean * -0.5 * (self.ivar**3), axis=0)
+        dmean = np.sum(dnormalized * -self.ivar, axis=0) + dvar * np.mean(-2.0 * self.x_sub_mean, axis=0)
+
+        dx = (dnormalized * self.ivar) + (dvar * 2.0 * self.x_sub_mean / N) + (dmean / N)
 
 
         # YOUR CODE ENDS
@@ -216,11 +278,13 @@ class BatchNorm2d(Layer):
             
             # Update our running mean and variance then store.
 
-            running_mean = None
-            running_var = None
-            
+            running_mean = self.momentum * self.running_mean + (1 - self.momentum) * self.batch_mean
+            running_var = self.momentum * self.running_var + (1 - self.momentum) * self.batch_var
 
             # YOUR CODE ENDS
+            self.running_mean = running_mean.copy()
+            self.running_var = running_var.copy()
+
         else:
             # During inference, use running mean and variance
             self.x_normalized = (x - self.running_mean) / np.sqrt(self.running_var + self.epsilon)
@@ -235,6 +299,22 @@ class BatchNorm2d(Layer):
 
         # YOUR CODE STARTS
 
+        # Gradients for gamma and beta
+        dgamma = np.sum(dprev * self.x_normalized, axis=(0, 2, 3), keepdims=True)
+        dbeta = np.sum(dprev, axis=(0, 2, 3), keepdims=True)
+
+        # Gradient for normalized input
+        dnormalized = dprev * self.gamma
+
+        # Gradients for variance and mean
+        dvar = np.sum(dnormalized * self.x_sub_mean * -0.5 * np.power(self.batch_var + self.epsilon, -1.5), axis=(0, 2, 3), keepdims=True)
+        dmean = np.sum(dnormalized * -1 / np.sqrt(self.batch_var + self.epsilon), axis=(0, 2, 3), keepdims=True) + \
+                dvar * np.sum(-2 * self.x_sub_mean, axis=(0, 2, 3), keepdims=True) / (N * H * W)
+
+        # Gradient for input
+        dx = (dnormalized / np.sqrt(self.batch_var + self.epsilon)) + \
+            (dvar * 2 * self.x_sub_mean / (N * H * W)) + \
+            (dmean / (N * H * W))
 
         # YOUR CODE ENDS
 

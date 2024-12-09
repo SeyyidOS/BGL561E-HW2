@@ -34,6 +34,20 @@ class Conv2d(LayerWithWeights):
         # TO DO: Do cross-correlation by using for loops
         # YOUR CODE STARTS
 
+        out = np.zeros([N, F, out_H, out_W])
+
+        for n in range(N):  # batch
+            for f in range(F):  # filters
+                for i in range(out_H):  # height
+                    for j in range(out_W):  # width
+                        h_start = i * self.stride
+                        h_end = h_start + FH
+                        w_start = j * self.stride
+                        w_end = w_start + FW
+                        
+                        out[n, f, i, j] = np.sum(
+                            padded_x[n, :, h_start:h_end, w_start:w_end] * self.W[f, :, :, :]
+                        ) + self.b[f]
 
         # YOUR CODE ENDS
         
@@ -53,6 +67,28 @@ class Conv2d(LayerWithWeights):
 
 
         # YOUR CODE STARTS
+        # Bias
+        for f in range(F):
+            db[f] = np.sum(dprev[:, f, :, :])
+
+        # Weights and Input
+        for n in range(N):
+            for f in range(F):
+                for i in range(out_H):
+                    for j in range(out_W):
+                        h_start = i * self.stride
+                        h_end = h_start + FH
+                        w_start = j * self.stride
+                        w_end = w_start + FW
+
+                        # Weights
+                        dw[f, :, :, :] += padded_x[n, :, h_start:h_end, w_start:w_end] * dprev[n, f, i, j]
+
+                        # Input
+                        dx_temp[n, :, h_start:h_end, w_start:w_end] += self.W[f, :, :, :] * dprev[n, f, i, j]
+
+        # Remove padding
+        dx = dx_temp[:, :, self.padding:-self.padding, self.padding:-self.padding]
 
 
         # YOUR CODE ENDS
