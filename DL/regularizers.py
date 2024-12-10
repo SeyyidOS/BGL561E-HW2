@@ -234,8 +234,6 @@ class BatchNorm(Layer):
         return dx, dgamma, dbeta
 
 
-
-
 class BatchNorm2d(Layer):
     def __init__(self, num_features, momentum=0.9, epsilon=1e-5):
         self.mode = 'train'
